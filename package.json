@@ -12,9 +12,15 @@
   "dependencies": {
     "@fontsource/nunito": "^5.1.1",
     "@tailwindcss/vite": "^4.0.8",
+    "axios": "^1.8.2",
+    "cloudinary": "^2.5.1",
+    "firebase": "^11.4.0",
     "framer-motion": "^12.4.7",
+    "pdfjs-dist": "^4.8.69",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-pdf": "^9.2.1",
+    "react-router-dom": "^7.3.0",
     "tailwindcss": "^4.0.8"
   },
   "devDependencies": {
