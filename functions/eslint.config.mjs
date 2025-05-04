@@ -8,21 +8,21 @@ export default [
       ecmaVersion: 2021,
       sourceType: "module",
       globals: {
-        ...globals.node, // Includes module, require, exports
+        ...globals.node,
       },
     },
     rules: {
       ...js.configs.recommended.rules,
-      "no-restricted-globals": ["error", "name", "length"], // Your custom rule
-      "quotes": ["error", "double", { allowTemplateLiterals: true }], // Double quotes
-      "no-unused-vars": ["warn", { vars: "all", args: "after-used", ignoreRestSiblings: false }], // Warn on unused vars
+      "no-restricted-globals": ["error", "name", "length"],
+      "quotes": ["error", "double", { allowTemplateLiterals: true }],
+      "no-unused-vars": ["warn", { vars: "all", args: "after-used", ignoreRestSiblings: false }],
     },
   },
   {
     files: ["**/*.spec.*"],
     languageOptions: {
       globals: {
-        ...globals.mocha, // Support Mocha for test files
+        ...globals.mocha,
       },
     },
   },

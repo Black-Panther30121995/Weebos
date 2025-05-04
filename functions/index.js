@@ -1,16 +1,14 @@
-const functions = require("firebase-functions");
-const admin = require("firebase-admin");
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
 
-admin.initializeApp();
 const app = express();
+app.use(express.json());
 
-// Enable CORS for your Firebase Hosting domain
-app.use(cors({ origin: "https://weebos-31f97.web.app" }));
+// Enable CORS for local and Firebase Hosting
+app.use(cors({ origin: ["http://localhost:3000", "https://weebos-31f97.web.app"] }));
 
-// Endpoint to delete chapter images from Cloudinary and update Firestore
+// Endpoint to delete chapter images from Cloudinary
 app.delete("/delete-chapter", async (req, res) => {
   const { comicName, chapterNum } = req.body;
 
@@ -20,13 +18,13 @@ app.delete("/delete-chapter", async (req, res) => {
 
   try {
     // Delete images from Cloudinary
-    const cloudinaryUrl = `https://api.cloudinary.com/v1_1/${functions.config().cloudinary.cloud_name}/resources/image/upload`;
+    const cloudinaryUrl = `https://api.cloudinary.com/v1_1/${process.env.CLOUDINARY_CLOUD_NAME}/resources/image/upload`;
     const folder = `comics/${comicName}/Chapter${chapterNum}`;
 
     await axios.delete(cloudinaryUrl, {
       auth: {
-        username: functions.config().cloudinary.api_key,
-        password: functions.config().cloudinary.api_secret,
+        username: process.env.CLOUDINARY_API_KEY,
+        password: process.env.CLOUDINARY_API_SECRET,
       },
       params: {
         prefix: folder,
@@ -35,17 +33,19 @@ app.delete("/delete-chapter", async (req, res) => {
       },
     });
 
-    // Update Firestore to remove the chapter
-    const docRef = admin.firestore().doc(`comics/${comicName}`);
-    await docRef.update({
-      [`chapters.Chapter${chapterNum}`]: admin.firestore.FieldValue.delete(),
-    });
-
-    return res.status(200).json({ message: "Chapter deleted successfully from Cloudinary and Firestore" });
+    return res.status(200).json({ message: "Chapter images deleted successfully from Cloudinary" });
   } catch (error) {
-    console.error("Error deleting chapter:", error);
-    return res.status(500).json({ error: "Failed to delete chapter" });
+    console.error("Error deleting chapter images:", error);
+    return res.status(500).json({ error: "Failed to delete chapter images" });
   }
 });
 
-exports.api = functions.https.onRequest(app);
+// Health check endpoint
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "OK" });
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
