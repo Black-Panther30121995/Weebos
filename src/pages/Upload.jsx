@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useContext } from "react";
 import { useNavigate, useParams, Navigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { db } from "../firebase";
-import { collection, getDocs, doc, setDoc, getDoc, updateDoc, deleteField } from "firebase/firestore";
+import { collection, getDocs, doc, setDoc, getDoc, updateDoc } from "firebase/firestore";
 import axios from "axios";
 import { ThemeContext } from "../context/ThemeContext";
 
@@ -17,8 +17,15 @@ export default function Upload() {
   const [comicsData, setComicsData] = useState({});
   const [selectedChapterToDelete, setSelectedChapterToDelete] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState(0);
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
+  const uploadButtonRef = useRef(null);
+  const deleteButtonRef = useRef(null);
+  const [uploadButtonWidth, setUploadButtonWidth] = useState(0);
+  const [deleteButtonWidth, setDeleteButtonWidth] = useState(0);
 
   const CLOUDINARY_CLOUD_NAME = "dzvd0wfym";
   const CLOUDINARY_UPLOAD_PRESET = "comic_upload";
@@ -43,6 +50,15 @@ export default function Upload() {
     };
     fetchComics();
   }, []);
+
+  useEffect(() => {
+    if (uploadButtonRef.current && !uploading) {
+      setUploadButtonWidth(uploadButtonRef.current.offsetWidth);
+    }
+    if (deleteButtonRef.current && !deleting) {
+      setDeleteButtonWidth(deleteButtonRef.current.offsetWidth);
+    }
+  }, [uploading, deleting]);
 
   const handleDrag = (e) => {
     e.preventDefault();
@@ -93,13 +109,12 @@ export default function Upload() {
     }
 
     setUploading(true);
+    setUploadProgress(0);
     try {
-      // Use the exact selected comic title as document ID
       const docRef = doc(db, "comics", selectedComic);
       const docSnap = await getDoc(docRef);
 
       if (!docSnap.exists()) {
-        // Create new document if it doesn't exist
         await setDoc(docRef, {
           title: selectedComic,
           chapters: {},
@@ -110,6 +125,7 @@ export default function Upload() {
           info: "",
           genres: comicsData[selectedComic]?.genres || [],
         });
+        setUploadProgress(10);
       }
 
       const sortedImageFiles = [...imageFiles].sort((a, b) => {
@@ -117,6 +133,10 @@ export default function Upload() {
         const numB = parseInt(b.name.match(/\d+/)?.[0] || "0", 10);
         return numA - numB;
       });
+
+      const totalImages = sortedImageFiles.length;
+      const progressPerImage = 80 / totalImages;
+      let currentProgress = docSnap.exists() ? 0 : 10;
 
       const imageUrls = await Promise.all(
         sortedImageFiles.map(async (file, index) => {
@@ -127,6 +147,8 @@ export default function Upload() {
           formData.append("public_id", `${index}-${file.name}`);
 
           const response = await axios.post(CLOUDINARY_API_URL, formData);
+          currentProgress += progressPerImage;
+          setUploadProgress(Math.min(Math.round(currentProgress), 90));
           return response.data.secure_url;
         })
       );
@@ -134,8 +156,8 @@ export default function Upload() {
       await updateDoc(docRef, {
         [`chapters.${chapterKey}`]: imageUrls,
       });
+      setUploadProgress(100);
 
-      // Refresh comicsData to reflect the new chapter
       const updatedDoc = await getDoc(docRef);
       setComicsData((prev) => ({
         ...prev,
@@ -153,6 +175,7 @@ export default function Upload() {
       alert(`Failed to upload chapter: ${error.message}`);
     } finally {
       setUploading(false);
+      setUploadProgress(0);
     }
   };
 
@@ -162,24 +185,47 @@ export default function Upload() {
       return;
     }
 
+    setDeleting(true);
+    setDeleteProgress(0);
     try {
-      const chapterKey = `Chapter${selectedChapterToDelete}`;
-      const docRef = doc(db, "comics", selectedComic);
-      await updateDoc(docRef, {
-        [`chapters.${chapterKey}`]: deleteField(),
+      const apiUrl = process.env.REACT_APP_API_URL || "http://localhost:3001";
+      setDeleteProgress(25);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await axios.delete(`${apiUrl}/delete-chapter`, {
+        data: { comicName: selectedComic, chapterNum: selectedChapterToDelete },
       });
-
-      alert("Chapter deleted successfully!");
-      const updatedDoc = await getDoc(docRef);
+      setDeleteProgress(75);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const updatedDoc = await getDoc(doc(db, "comics", selectedComic));
       setComicsData((prev) => ({
         ...prev,
         [selectedComic]: updatedDoc.data(),
       }));
+      setDeleteProgress(100);
+
+      alert("Chapter deleted successfully!");
       setSelectedChapterToDelete("");
     } catch (error) {
       console.error("Delete failed:", error);
-      alert("Failed to delete chapter: " + error.message);
+      let errorMessage = "Failed to delete chapter";
+      if (error.code === "ERR_NETWORK") {
+        errorMessage = "Network error: Could not connect to the backend server. Please check if the server is running.";
+      } else if (error.response) {
+        errorMessage = `Server error: ${error.response.data.error || error.message}`;
+      }
+      alert(`${errorMessage}. Please try again or contact support.`);
+    } finally {
+      setDeleting(false);
+      setDeleteProgress(0);
     }
+  };
+
+  const getSortedChapters = (chapters) => {
+    return Object.keys(chapters || {}).sort((a, b) => {
+      const aNum = parseInt(a.replace("Chapter", ""), 10);
+      const bNum = parseInt(b.replace("Chapter", ""), 10);
+      return aNum - bNum;
+    });
   };
 
   return (
@@ -259,7 +305,7 @@ export default function Upload() {
                   Upload Image Folder
                 </label>
                 <div
-                  className={`w-full h-40 largest:border-2 border-dashed rounded-lg flex items-center justify-center cursor-pointer ${
+                  className={`w-full h-40 border-2 border-dashed rounded-lg flex items-center justify-center cursor-pointer ${
                     dragActive
                       ? "border-teal-500 bg-teal-900 bg-opacity-20"
                       : theme === "dark"
@@ -291,13 +337,28 @@ export default function Upload() {
               <button
                 type="submit"
                 disabled={uploading}
-                className={`px-6 py-3 rounded-lg transition-colors duration-300 shadow-md ${
+                ref={uploadButtonRef}
+                style={uploading ? { width: `${uploadButtonWidth}px` } : {}}
+                className={`w-full px-6 py-3 rounded-lg transition-colors duration-300 shadow-md relative overflow-hidden ${
                   theme === "dark"
-                    ? "bg-teal-600 text-white hover:bg-teal-700 disabled:bg-gray-600"
-                    : "bg-teal-500 text-white hover:bg-teal-600 disabled:bg-gray-400"
+                    ? `bg-teal-600 text-white hover:bg-teal-700 ${uploading ? "bg-transparent" : ""}`
+                    : `bg-teal-500 text-white hover:bg-teal-600 ${uploading ? "bg-transparent" : ""}`
                 }`}
               >
-                {uploading ? "Uploading..." : "Upload Chapter"}
+                {uploading ? (
+                  <>
+                    <div
+                      className="absolute inset-0 bg-gray-500 transition-all duration-300"
+                      style={{
+                        width: `${uploadProgress}%`,
+                        minWidth: "100%",
+                      }}
+                    ></div>
+                    <span className="relative z-10 text-white">{uploadProgress}%</span>
+                  </>
+                ) : (
+                  "Upload Chapter"
+                )}
               </button>
             </form>
 
@@ -327,7 +388,7 @@ export default function Upload() {
                   }`}
                 >
                   <option value="">-- Select a Chapter --</option>
-                  {Object.keys(comicsData[selectedComic]?.chapters || {}).map((chapter) => (
+                  {getSortedChapters(comicsData[selectedComic]?.chapters).map((chapter) => (
                     <option key={chapter} value={chapter.replace("Chapter", "")}>
                       {chapter}
                     </option>
@@ -336,13 +397,29 @@ export default function Upload() {
               </div>
               <button
                 onClick={handleDelete}
-                className={`px-6 py-3 rounded-lg transition-colors duration-300 shadow-md ${
+                disabled={deleting}
+                ref={deleteButtonRef}
+                style={deleting ? { width: `${deleteButtonWidth}px` } : {}}
+                className={`w-full px-6 py-3 rounded-lg transition-colors duration-300 shadow-md relative overflow-hidden ${
                   theme === "dark"
-                    ? "bg-red-600 text-white hover:bg-red-700"
-                    : "bg-red-500 text-white hover:bg-red-600"
+                    ? `bg-red-600 text-white hover:bg-red-700 ${deleting ? "bg-transparent" : ""}`
+                    : `bg-red-500 text-white hover:bg-red-600 ${deleting ? "bg-transparent" : ""}`
                 }`}
               >
-                Delete Chapter
+                {deleting ? (
+                  <>
+                    <div
+                      className="absolute inset-0 bg-gray-500 transition-all duration-300"
+                      style={{
+                        width: `${deleteProgress}%`,
+                        minWidth: "100%",
+                      }}
+                    ></div>
+                    <span className="relative z-10 text-white">{deleteProgress}%</span>
+                  </>
+                ) : (
+                  "Delete Chapter"
+                )}
               </button>
             </div>
           </>

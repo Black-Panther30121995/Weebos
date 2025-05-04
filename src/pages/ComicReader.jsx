@@ -167,7 +167,17 @@ export default function ComicReader() {
     }
   };
 
-  const chapterKeys = Object.keys(comicData.chapters);
+  const getSortedChapters = (chapters) => {
+    return Object.keys(chapters || {})
+      .map((chapter) => ({
+        key: chapter,
+        num: parseInt(chapter.replace("Chapter", ""), 10),
+      }))
+      .sort((a, b) => a.num - b.num)
+      .map((item) => item.key);
+  };
+
+  const chapterKeys = getSortedChapters(comicData.chapters);
 
   return (
     <div className={`w-full min-h-screen flex flex-col items-center ${theme === "dark" ? "bg-gray-900 text-gray-200" : "bg-gray-100 text-gray-900"}`}>

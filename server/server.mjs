@@ -4,10 +4,34 @@ import fs from "fs";
 import path from "path";
 import cors from "cors";
 import { fileURLToPath, pathToFileURL } from "url";
+import { v2 as cloudinary } from "cloudinary";
+import dotenv from "dotenv";
+
+// Load environment variables from .env file
+dotenv.config();
+
+// Verify Cloudinary environment variables
+console.log("Cloudinary Config Check:", {
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET ? "[REDACTED]" : "MISSING",
+});
+
+if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+  console.error("Missing Cloudinary environment variables. Please check .env file.");
+  process.exit(1);
+}
 
 // Derive __dirname equivalent for ESM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Configure Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
 const app = express();
 const PORT = 3001;
@@ -56,7 +80,7 @@ app.post("/upload", upload.array("images"), (req, res) => {
       description: "A user-uploaded comic.",
       chapters: {},
       genre: "Unknown",
-      ratings: [], // Initialize ratings array
+      ratings: [],
     };
   }
 
@@ -97,7 +121,7 @@ app.post("/add-comic", express.json(), (req, res) => {
     description: "A user-added comic.",
     chapters: {},
     genre: genre || "Unknown",
-    ratings: [], // Initialize ratings array
+    ratings: [],
   };
   console.log(`Added new comic: ${comicName}`, comics[comicName]);
 
@@ -145,7 +169,48 @@ app.delete("/upload", express.json(), (req, res) => {
   res.json({ message: `Chapter ${chapterNum} deleted from '${comicName}'.` });
 });
 
-// New API to rate a comic
+// New API to delete a chapter from Cloudinary
+app.delete("/delete-chapter", express.json(), async (req, res) => {
+  const { comicName, chapterNum } = req.body;
+  const chapterKey = `Chapter${chapterNum}`;
+  const folderPath = `comics/${comicName}/${chapterKey}`;
+
+  console.log(`Attempting to delete Cloudinary folder: ${folderPath}`);
+
+  try {
+    // Validate input
+    if (!comicName || !chapterNum) {
+      console.log("Missing comicName or chapterNum:", { comicName, chapterNum });
+      return res.status(400).json({ message: "comicName and chapterNum are required." });
+    }
+
+    // Delete all resources in the folder
+    const deleteResult = await cloudinary.api.delete_resources_by_prefix(folderPath, {
+      resource_type: "image",
+    });
+    console.log(`Cloudinary deletion result for ${folderPath}:`, deleteResult);
+
+    // Delete the empty folder
+    await cloudinary.api.delete_folder(folderPath);
+    console.log(`Deleted Cloudinary folder: ${folderPath}`);
+
+    res.json({ message: `Chapter ${chapterNum} images deleted from Cloudinary for '${comicName}'.` });
+  } catch (err) {
+    console.error(`Failed to delete Cloudinary folder ${folderPath}:`, {
+      message: err.message,
+      name: err.name,
+      http_code: err.http_code,
+      stack: err.stack,
+    });
+    res.status(500).json({ 
+      message: "Failed to delete chapter images from Cloudinary.",
+      error: err.message,
+      http_code: err.http_code || "N/A",
+    });
+  }
+});
+
+// API to rate a comic
 app.post("/rate-comic", express.json(), (req, res) => {
   const { comicName, rating } = req.body;
 
@@ -159,7 +224,6 @@ app.post("/rate-comic", express.json(), (req, res) => {
     return res.status(404).json({ message: `Comic '${comicName}' not found.` });
   }
 
-  // Add the rating to the comic's ratings array
   comics[comicName].ratings = comics[comicName].ratings || [];
   comics[comicName].ratings.push(Number(rating));
   console.log(`Added rating ${rating} to '${comicName}', ratings:`, comics[comicName].ratings);
