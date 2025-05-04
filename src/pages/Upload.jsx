@@ -30,6 +30,7 @@ export default function Upload() {
   const CLOUDINARY_CLOUD_NAME = "dzvd0wfym";
   const CLOUDINARY_UPLOAD_PRESET = "comic_upload";
   const CLOUDINARY_API_URL = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`;
+  const apiUrl = "https://weebos-1.onrender.com";
 
   if (!currentUser || userRole !== "publisher") {
     return <Navigate to="/" />;
@@ -114,6 +115,24 @@ export default function Upload() {
       const docRef = doc(db, "comics", selectedComic);
       const docSnap = await getDoc(docRef);
 
+      // Simulate initial Firestore progress (0-5%)
+      let currentProgress = 0;
+      const simulateProgress = (start, end, duration) => {
+        return new Promise((resolve) => {
+          const increment = (end - start) / (duration / 50);
+          const interval = setInterval(() => {
+            currentProgress = Math.min(currentProgress + increment, end);
+            setUploadProgress(Math.round(currentProgress));
+            if (currentProgress >= end) {
+              clearInterval(interval);
+              resolve();
+            }
+          }, 50);
+        });
+      };
+
+      await simulateProgress(0, 5, 500); // 0.5s for Firestore check
+
       if (!docSnap.exists()) {
         await setDoc(docRef, {
           title: selectedComic,
@@ -125,6 +144,9 @@ export default function Upload() {
           info: "",
           genres: comicsData[selectedComic]?.genres || [],
         });
+        await simulateProgress(5, 10, 500); // 0.5s for Firestore creation
+      } else {
+        currentProgress = 10;
         setUploadProgress(10);
       }
 
@@ -134,29 +156,41 @@ export default function Upload() {
         return numA - numB;
       });
 
-      const totalImages = sortedImageFiles.length;
-      const progressPerImage = 80 / totalImages;
-      let currentProgress = docSnap.exists() ? 0 : 10;
+      const totalBytes = sortedImageFiles.reduce((sum, file) => sum + file.size, 0);
+      let uploadedBytes = 0;
 
       const imageUrls = await Promise.all(
-        sortedImageFiles.map(async (file, index) => {
+        sortedImageFiles.map(async (file) => {
           const formData = new FormData();
           formData.append("file", file);
           formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
           formData.append("folder", `comics/${selectedComic}/${chapterKey}`);
-          formData.append("public_id", `${index}-${file.name}`);
+          formData.append("public_id", `${sortedImageFiles.indexOf(file)}-${file.name}`);
 
-          const response = await axios.post(CLOUDINARY_API_URL, formData);
-          currentProgress += progressPerImage;
-          setUploadProgress(Math.min(Math.round(currentProgress), 90));
+          const response = await axios.post(CLOUDINARY_API_URL, formData, {
+            onUploadProgress: (progressEvent) => {
+              const fileBytes = progressEvent.loaded;
+              const fileTotal = progressEvent.total || file.size;
+              const fileProgress = (fileBytes / fileTotal) * file.size;
+              const newUploadedBytes = uploadedBytes + fileProgress;
+              const progress = 10 + (newUploadedBytes / totalBytes) * 80; // 10-90%
+              setUploadProgress(Math.min(Math.round(progress), 90));
+            },
+          });
+          uploadedBytes += file.size;
+          const progress = 10 + (uploadedBytes / totalBytes) * 80;
+          setUploadProgress(Math.min(Math.round(progress), 90));
           return response.data.secure_url;
         })
       );
 
+      await simulateProgress(uploadProgress, 95, 500); // 0.5s for Firestore update prep
+
       await updateDoc(docRef, {
         [`chapters.${chapterKey}`]: imageUrls,
       });
-      setUploadProgress(100);
+
+      await simulateProgress(95, 100, 500); // 0.5s for completion
 
       const updatedDoc = await getDoc(docRef);
       setComicsData((prev) => ({
@@ -188,21 +222,38 @@ export default function Upload() {
     setDeleting(true);
     setDeleteProgress(0);
     try {
-      const apiUrl = "https://weebos.onrender.com";
-      setDeleteProgress(25);
+      // Simulate progress for deletion (0-70% for Cloudinary, 70-90% for Firestore, 90-100% for state)
+      const simulateProgress = (start, end, duration) => {
+        return new Promise((resolve) => {
+          const increment = (end - start) / (duration / 50);
+          let currentProgress = start;
+          const interval = setInterval(() => {
+            currentProgress = Math.min(currentProgress + increment, end);
+            setDeleteProgress(Math.round(currentProgress));
+            if (currentProgress >= end) {
+              clearInterval(interval);
+              resolve();
+            }
+          }, 50);
+        });
+      };
+
+      await simulateProgress(0, 30, 1000); // 1s for initiating backend call
 
       // Delete images from Cloudinary
       await axios.delete(`${apiUrl}/delete-chapter`, {
         data: { comicName: selectedComic, chapterNum: selectedChapterToDelete },
       });
-      setDeleteProgress(50);
+
+      await simulateProgress(30, 70, 1000); // 1s for Cloudinary deletion
 
       // Delete chapter from Firestore
       const docRef = doc(db, "comics", selectedComic);
       await updateDoc(docRef, {
         [`chapters.Chapter${selectedChapterToDelete}`]: deleteField(),
       });
-      setDeleteProgress(75);
+
+      await simulateProgress(70, 90, 500); // 0.5s for Firestore deletion
 
       // Update local state
       setComicsData((prev) => {
@@ -213,7 +264,8 @@ export default function Upload() {
           [selectedComic]: { ...prev[selectedComic], chapters: updatedChapters },
         };
       });
-      setDeleteProgress(100);
+
+      await simulateProgress(90, 100, 500); // 0.5s for state update
 
       alert("Chapter deleted successfully!");
       setSelectedChapterToDelete("");
