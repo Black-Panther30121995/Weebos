@@ -1,6 +1,18 @@
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
+const admin = require("firebase-admin");
+
+// Initialize Firebase Admin SDK
+admin.initializeApp({
+  credential: admin.credential.cert({
+    projectId: process.env.FIREBASE_PROJECT_ID,
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+  }),
+});
+
+const db = admin.firestore();
 
 const app = express();
 
@@ -48,7 +60,7 @@ app.use((req, res, next) => {
 // Parse JSON bodies
 app.use(express.json());
 
-// Endpoint to delete chapter images from Cloudinary
+// Endpoint to delete chapter images from Cloudinary and Firestore
 app.delete("/delete-chapter", async (req, res) => {
   // Ensure CORS headers
   res.set("Access-Control-Allow-Origin", req.get("Origin") || "http://localhost:5173");
@@ -65,7 +77,7 @@ app.delete("/delete-chapter", async (req, res) => {
     const cloudinaryUrl = `https://api.cloudinary.com/v1_1/${process.env.CLOUDINARY_CLOUD_NAME}/resources/image/upload`;
     const folder = `comics/${comicName}/Chapter${chapterNum}`;
 
-    const response = await axios.delete(cloudinaryUrl, {
+    const cloudinaryResponse = await axios.delete(cloudinaryUrl, {
       auth: {
         username: process.env.CLOUDINARY_API_KEY,
         password: process.env.CLOUDINARY_API_SECRET,
@@ -77,18 +89,30 @@ app.delete("/delete-chapter", async (req, res) => {
       },
     });
 
-    if (response.data && response.data.deleted && Object.keys(response.data.deleted).length === 0) {
-      console.log(`No images found in folder: ${folder}`);
-      return res.status(404).json({ message: "No images found in the specified folder" });
+    const cloudinaryDeleted = !(cloudinaryResponse.data && cloudinaryResponse.data.deleted && Object.keys(cloudinaryResponse.data.deleted).length === 0);
+
+    // Delete chapter document from Firestore
+    const chapterRef = db.collection("comics").doc(comicName).collection("chapters").doc(`Chapter${chapterNum}`);
+    await chapterRef.delete();
+
+    console.log(`Deleted Firestore document: comics/${comicName}/chapters/Chapter${chapterNum}`);
+
+    if (!cloudinaryDeleted) {
+      console.log(`No images found in Cloudinary folder: ${folder}`);
+      return res.status(200).json({ 
+        message: "Chapter document deleted from Firestore, but no images found in Cloudinary" 
+      });
     }
 
-    return res.status(200).json({ message: "Chapter images deleted successfully from Cloudinary" });
+    return res.status(200).json({ 
+      message: "Chapter images deleted successfully from Cloudinary and chapter document deleted from Firestore" 
+    });
   } catch (error) {
-    console.error("Error deleting chapter images:", {
+    console.error("Error deleting chapter:", {
       message: error.message,
       response: error.response ? error.response.data : null,
     });
-    return res.status(500).json({ error: "Failed to delete chapter images" });
+    return res.status(500).json({ error: "Failed to delete chapter" });
   }
 });
 
@@ -99,7 +123,7 @@ app.get("/health", (req, res) => {
 
 // Debug endpoint to confirm deployment
 app.get("/cors-debug", (req, res) => {
-  res.json({ message: "CORS debug", version: "2025-05-04-v3" });
+  res.json({ message: "CORS debug", version: "2025-05-04-v3-firestore" });
 });
 
 // Global error middleware to ensure CORS headers
