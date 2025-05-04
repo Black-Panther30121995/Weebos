@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useContext } from "react";
 import { useNavigate, useParams, Navigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { db } from "../firebase";
-import { collection, getDocs, doc, setDoc, getDoc, updateDoc } from "firebase/firestore";
+import { collection, getDocs, doc, setDoc, getDoc, updateDoc, deleteField } from "firebase/firestore";
 import axios from "axios";
 import { ThemeContext } from "../context/ThemeContext";
 
@@ -188,19 +188,31 @@ export default function Upload() {
     setDeleting(true);
     setDeleteProgress(0);
     try {
-      const apiUrl = process.env.REACT_APP_API_URL || "http://localhost:3001";
+      const apiUrl = "https://weebos.onrender.com";
       setDeleteProgress(25);
-      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // Delete images from Cloudinary
       await axios.delete(`${apiUrl}/delete-chapter`, {
         data: { comicName: selectedComic, chapterNum: selectedChapterToDelete },
       });
+      setDeleteProgress(50);
+
+      // Delete chapter from Firestore
+      const docRef = doc(db, "comics", selectedComic);
+      await updateDoc(docRef, {
+        [`chapters.Chapter${selectedChapterToDelete}`]: deleteField(),
+      });
       setDeleteProgress(75);
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      const updatedDoc = await getDoc(doc(db, "comics", selectedComic));
-      setComicsData((prev) => ({
-        ...prev,
-        [selectedComic]: updatedDoc.data(),
-      }));
+
+      // Update local state
+      setComicsData((prev) => {
+        const updatedChapters = { ...prev[selectedComic].chapters };
+        delete updatedChapters[`Chapter${selectedChapterToDelete}`];
+        return {
+          ...prev,
+          [selectedComic]: { ...prev[selectedComic], chapters: updatedChapters },
+        };
+      });
       setDeleteProgress(100);
 
       alert("Chapter deleted successfully!");

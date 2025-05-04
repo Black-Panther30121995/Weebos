@@ -3,10 +3,47 @@ const cors = require("cors");
 const axios = require("axios");
 
 const app = express();
-app.use(express.json());
 
-// Enable CORS for local and Firebase Hosting
-app.use(cors({ origin: ["http://localhost:3000", "https://weebos-31f97.web.app"] }));
+// Configure CORS
+const corsOptions = {
+  origin: ["http://localhost:5173", "https://weebos-31f97.web.app"],
+  methods: ["GET", "POST", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type"],
+  credentials: true,
+  optionsSuccessStatus: 200,
+};
+
+// Apply CORS middleware first
+app.use(cors(corsOptions));
+
+// Explicitly handle OPTIONS for /delete-chapter
+app.options("/delete-chapter", cors(corsOptions), (req, res) => {
+  console.log("Handling OPTIONS request for /delete-chapter", {
+    origin: req.get("Origin"),
+    headers: req.headers,
+  });
+  res.status(200).end();
+});
+
+// Log all requests and responses for debugging
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`, {
+    origin: req.get("Origin"),
+    headers: req.headers,
+  });
+  const originalSend = res.send;
+  res.send = function (body) {
+    console.log(`Response for ${req.method} ${req.url}`, {
+      status: res.statusCode,
+      headers: res.getHeaders(),
+    });
+    return originalSend.call(this, body);
+  };
+  next();
+});
+
+// Parse JSON bodies
+app.use(express.json());
 
 // Endpoint to delete chapter images from Cloudinary
 app.delete("/delete-chapter", async (req, res) => {
@@ -35,7 +72,10 @@ app.delete("/delete-chapter", async (req, res) => {
 
     return res.status(200).json({ message: "Chapter images deleted successfully from Cloudinary" });
   } catch (error) {
-    console.error("Error deleting chapter images:", error);
+    console.error("Error deleting chapter images:", {
+      message: error.message,
+      response: error.response ? error.response.data : null,
+    });
     return res.status(500).json({ error: "Failed to delete chapter images" });
   }
 });

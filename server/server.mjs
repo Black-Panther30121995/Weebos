@@ -34,10 +34,47 @@ cloudinary.config({
 });
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
-// Middleware
-app.use(cors());
+// Configure CORS
+const corsOptions = {
+  origin: ["http://localhost:5173", "https://weebos-31f97.web.app"],
+  methods: ["GET", "POST", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type"],
+  credentials: true,
+  optionsSuccessStatus: 200,
+};
+
+// Apply CORS middleware first
+app.use(cors(corsOptions));
+
+// Explicitly handle OPTIONS for /delete-chapter
+app.options("/delete-chapter", cors(corsOptions), (req, res) => {
+  console.log("Handling OPTIONS request for /delete-chapter", {
+    origin: req.get("Origin"),
+    headers: req.headers,
+  });
+  res.status(200).end();
+});
+
+// Log all requests for debugging
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`, {
+    origin: req.get("Origin"),
+    headers: req.headers,
+  });
+  const originalSend = res.send;
+  res.send = function (body) {
+    console.log(`Response for ${req.method} ${req.url}`, {
+      status: res.statusCode,
+      headers: res.getHeaders(),
+    });
+    return originalSend.call(this, body);
+  };
+  next();
+});
+
+// Other middleware
 app.use(express.json({ limit: "50mb" }));
 app.use("/uploads", express.static(path.join(__dirname, "../public/uploads")));
 
